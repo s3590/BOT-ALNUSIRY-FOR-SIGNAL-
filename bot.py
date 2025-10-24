@@ -9,6 +9,8 @@ import pandas_ta as ta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from twelvedata import TDClient
+from flask import Flask
+import threading
 
 # --- 1. إعدادات البوت والمتغيرات الأساسية ---
 
@@ -422,9 +424,48 @@ def main() -> None:
     # جدولة مهمة التحقق من الإشارات كل ثانية للتحكم الدقيق في التوقيت
     application.job_queue.run_repeating(check_signals_task, interval=1, first=5)
 
-    # بدء البوت
+    # --- 7. وظيفة تشغيل خادم الويب لإبقاء البوت مستيقظًا ---
+app = Flask(__name__)
+
+@app.route('/health')
+def health_check():
+    return "Bot is running", 200
+
+def run_flask():
+    # استخدم 0.0.0.0 للاستماع على جميع الواجهات
+    # Render سيوفر متغير PORT تلقائيًا
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# --- 8. الوظيفة الرئيسية (Main Function) ---
+def main() -> None:
+    """تشغيل البوت."""
+    # ... (نفس كود دالة main الموجود لديك)
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # إضافة معالجات الأوامر (نفس الكود السابق)
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(start_bot, pattern='^start_bot$'))
+    application.add_handler(CallbackQueryHandler(stop_bot, pattern='^stop_bot$'))
+    application.add_handler(CallbackQueryHandler(show_status, pattern='^show_status$'))
+    application.add_handler(CallbackQueryHandler(market_analysis_handler, pattern='^market_analysis$'))
+    application.add_handler(CallbackQueryHandler(pair_selection_handler, pattern='^select_'))
+    application.add_handler(CallbackQueryHandler(confirm_selection_handler, pattern='^confirm_selection$'))
+    application.add_handler(CallbackQueryHandler(cancel_selection_handler, pattern='^cancel_selection$'))
+
+    # جدولة مهمة التحقق من الإشارات
+    application.job_queue.run_repeating(check_signals_task, interval=1, first=5)
+
+    # بدء البوت في خيط منفصل
     logger.info("بدء تشغيل البوت (نسخة مطورة)...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    thread = threading.Thread(target=application.run_polling, args=(Update.ALL_TYPES,))
+    thread.start()
+        
+    # بدء خادم الويب في الخيط الرئيسي
+    logger.info("بدء تشغيل خادم الويب لإبقاء الخدمة مستيقظة...")
+    run_flask()
 
 if __name__ == "__main__":
     main()
+
+
