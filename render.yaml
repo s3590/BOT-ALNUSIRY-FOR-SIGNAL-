@@ -1,0 +1,19 @@
+services:
+  - type: worker
+    name: pro-trading-bot # اسم الخدمة
+    env: python
+    plan: free # أو خطة مدفوعة إذا احتجت أداء أعلى
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python bot.py" # استبدل bot.py بالاسم الفعلي لملف البوت
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false # أدخل القيمة من لوحة تحكم Render
+      - key: TELEGRAM_CHAT_ID
+        sync: false # أدخل القيمة من لوحة تحكم Render
+      - key: TWELVE_DATA_API_KEY_1
+        sync: false # أدخل المفتاح الأول هنا
+      - key: TWELVE_DATA_API_KEY_2
+        sync: false # أدخل المفتاح الثاني هنا (اختياري لكن موصى به)
+        

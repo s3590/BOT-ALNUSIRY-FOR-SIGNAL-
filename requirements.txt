@@ -1,0 +1,6 @@
+python-telegram-bot
+pytz
+asyncio
+pandas
+pandas-ta
+twelvedata
