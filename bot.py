@@ -19,7 +19,7 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 API_KEY_1 = os.getenv('API_KEY_1')
 API_KEY_2 = os.getenv('API_KEY_2')
 
-API_KEYS = [key for key in [TWELVE_DATA_API_KEY_1, TWELVE_DATA_API_KEY_2] if key]
+API_KEYS = [key for key in [API_KEY_1, API_KEY_2] if key]
 
 # --- قائمة الأزواج الأساسية للتحليل (بعد الحذف) ---
 BASE_PAIRS = [
@@ -495,4 +495,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
