@@ -20,8 +20,6 @@ TWELVE_DATA_API_KEY_1 = os.getenv('TWELVE_DATA_API_KEY_1')
 TWELVE_DATA_API_KEY_2 = os.getenv('TWELVE_DATA_API_KEY_2')
 
 API_KEYS = [key for key in [TWELVE_DATA_API_KEY_1, TWELVE_DATA_API_KEY_2] if key]
-if not API_KEYS:
-    raise ValueError("يجب توفير مفتاح API واحد على الأقل من Twelve Data.")
 
 # --- قائمة الأزواج الأساسية للتحليل (بعد الحذف) ---
 BASE_PAIRS = [
@@ -32,18 +30,10 @@ BASE_PAIRS = [
 
 # --- الإعدادات الافتراضية للاستراتيجية ---
 DEFAULT_STRATEGY_SETTINGS = {
-    'signal_threshold': 3,
-    'ema_length': 50,
-    'rsi_length': 14,
-    'rsi_oversold': 30,
-    'rsi_overbought': 70,
-    'stoch_k': 14,
-    'stoch_d': 3,
-    'stoch_smooth_k': 3,
-    'stoch_oversold': 20,
-    'stoch_overbought': 80,
-    'atr_length': 14,
-    'atr_threshold_ratio': 0.0005
+    'signal_threshold': 3, 'ema_length': 50, 'rsi_length': 14,
+    'rsi_oversold': 30, 'rsi_overbought': 70, 'stoch_k': 14, 'stoch_d': 3,
+    'stoch_smooth_k': 3, 'stoch_oversold': 20, 'stoch_overbought': 80,
+    'atr_length': 14, 'atr_threshold_ratio': 0.0005
 }
 
 # --- إعدادات التنبيه ---
@@ -55,24 +45,28 @@ logger = logging.getLogger(__name__)
 
 # --- حالة البوت (يتم تخزينها في الذاكرة) ---
 bot_state = {
-    'is_running': False,
-    'active_pairs': [],
-    'last_signal_time': {},
-    'api_key_index': 0,
-    'selected_for_monitoring': set(),
+    'is_running': False, 'active_pairs': [], 'last_signal_time': {},
+    'api_key_index': 0, 'selected_for_monitoring': set(),
     'strategy_settings': DEFAULT_STRATEGY_SETTINGS.copy(),
-    'awaiting_input': None,
-    'message_to_delete': None,
+    'awaiting_input': None, 'message_to_delete': None,
 }
+
+# --- (جديد) وظيفة إرسال الأخطاء ---
+async def send_error_to_telegram(context: ContextTypes.DEFAULT_TYPE, error_message: str):
+    """يرسل رسالة خطأ إلى المستخدم عبر تليجرام."""
+    logger.error(error_message) # يسجل الخطأ في Render
+    await context.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔴 **خطأ في البوت** 🔴\n\n{error_message}")
 
 # --- 2. وظائف مساعدة واستراتيجية ---
 
 def get_next_api_key():
+    # ... (الكود لم يتغير)
     key = API_KEYS[bot_state['api_key_index']]
     bot_state['api_key_index'] = (bot_state['api_key_index'] + 1) % len(API_KEYS)
     return key
 
 async def fetch_data(pair):
+    # ... (الكود لم يتغير)
     try:
         api_key = get_next_api_key()
         td = TDClient(apikey=api_key)
@@ -84,6 +78,7 @@ async def fetch_data(pair):
         return None
 
 def calculate_indicators(df):
+    # ... (الكود لم يتغير)
     if df is None or df.empty: return None
     s = bot_state['strategy_settings']
     df.ta.ema(length=s['ema_length'], append=True, col_names=('EMA',))
@@ -93,6 +88,7 @@ def calculate_indicators(df):
     return df.iloc[0]
 
 def check_strategy(data):
+    # ... (الكود لم يتغير)
     if data is None: return None
     s = bot_state['strategy_settings']
     signals = {'buy': [], 'sell': []}
@@ -115,12 +111,14 @@ def check_strategy(data):
     return signals
 
 def get_display_pair(pair):
+    # ... (الكود لم يتغير)
     today = datetime.now(pytz.utc).weekday()
     if today == 5 or today == 6:
         return f"{pair} OTC"
     return pair
 
 async def send_signal(context: ContextTypes.DEFAULT_TYPE, chat_id, pair, direction, confidence, confirmations):
+    # ... (الكود لم يتغير)
     display_pair = get_display_pair(pair)
     emoji = "⬆️" if direction == "صعود" else "⬇️"
     stars = "⭐" * confidence
@@ -138,6 +136,7 @@ async def send_signal(context: ContextTypes.DEFAULT_TYPE, chat_id, pair, directi
     await context.bot.send_message(chat_id=chat_id, text=message_text)
 
 async def send_pre_signal_alert(context: ContextTypes.DEFAULT_TYPE, chat_id, pair, direction, confidence, confirmations):
+    # ... (الكود لم يتغير)
     display_pair = get_display_pair(pair)
     emoji = "⬆️" if direction == "صعود" else "⬇️"
     stars = "⭐" * confidence
@@ -163,12 +162,17 @@ REPLY_KEYBOARD_MARKUP = ReplyKeyboardMarkup([
 ], resize_keyboard=True)
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # --- (جديد) التحقق من المفاتيح عند البدء ---
+    if not API_KEYS:
+        await send_error_to_telegram(context, "لم يتم العثور على أي مفاتيح Twelve Data API في متغيرات البيئة. لن يعمل تحليل السوق.")
+    
     await update.message.reply_text(
         "أهلاً بك في بوت النصيري (نسخة مطورة)!\n\nاستخدم الأزرار في الأسفل للتحكم.",
         reply_markup=REPLY_KEYBOARD_MARKUP
     )
 
 async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # ... (الكود لم يتغير)
     active_pairs_str = ", ".join(bot_state['active_pairs']) if bot_state['active_pairs'] else "لا توجد أزواج قيد المراقبة."
     status_message = (
         f"**📊 حالة بوت النصيري:**\n\n"
@@ -179,6 +183,7 @@ async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(status_message, parse_mode='Markdown')
 
 async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # ... (الكود لم يتغير)
     if not bot_state['active_pairs']:
         await update.message.reply_text("❌ لا يمكن بدء المراقبة. الرجاء تحليل السوق واختيار زوج واحد على الأقل أولاً.")
         return
@@ -190,6 +195,7 @@ async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("البوت يعمل بالفعل.")
 
 async def stop_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # ... (الكود لم يتغير)
     if bot_state['is_running']:
         bot_state['is_running'] = False
         await update.message.reply_text("⏸️ تم إيقاف المراقبة.")
@@ -200,9 +206,22 @@ async def stop_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # --- 4. منطق تحليل السوق التفاعلي ---
 
 async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # --- (جديد) التحقق من المفاتيح قبل التحليل ---
+    if not API_KEYS:
+        await send_error_to_telegram(context, "فشل تحليل السوق لأنه لم يتم العثور على مفاتيح API.")
+        return
+
     await update.message.reply_text("⏳ جاري تحليل السوق لتحديد الأزواج النشطة...")
     tasks = [fetch_data(pair) for pair in BASE_PAIRS]
     results = await asyncio.gather(*tasks)
+    
+    data_found_count = sum(1 for df in results if df is not None and not df.empty)
+
+    # --- (جديد) التحقق إذا فشل جلب كل البيانات ---
+    if data_found_count == 0:
+        await send_error_to_telegram(context, "فشل تحليل السوق: لم يتمكن البوت من جلب البيانات لأي زوج. قد تكون مفاتيح API غير صالحة أو أن هناك مشكلة في الاتصال بـ Twelve Data.")
+        return
+
     active_pairs_found = []
     s = bot_state['strategy_settings']
     for pair, df in zip(BASE_PAIRS, results):
@@ -211,9 +230,11 @@ async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_
             if latest_data is not None and 'ATR' in latest_data and 'close' in latest_data and latest_data['close'] > 0:
                 if (latest_data['ATR'] / latest_data['close']) > s['atr_threshold_ratio']:
                     active_pairs_found.append(pair)
+    
     if not active_pairs_found:
-        await update.message.reply_text("لم يتم العثور على أزواج نشطة حاليًا. حاول مرة أخرى لاحقًا.")
+        await update.message.reply_text("تحليل السوق اكتمل: لم يتم العثور على أزواج نشطة حاليًا (السوق هادئ). حاول مرة أخرى لاحقًا.")
         return
+        
     bot_state['selected_for_monitoring'] = set()
     keyboard = [[InlineKeyboardButton(f"🔲 {pair}", callback_data=f"select_{pair}")] for pair in active_pairs_found]
     keyboard.append([InlineKeyboardButton("✅ بدء المراقبة بهذه الأزواج", callback_data="confirm_selection")])
@@ -221,6 +242,7 @@ async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text("**تحليل السوق اكتمل.**\n\nالرجاء تحديد الأزواج التي تريد مراقبتها:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def pair_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # ... (الكود لم يتغير)
     query = update.callback_query
     await query.answer()
     pair = query.data.split('_', 1)[1]
@@ -244,6 +266,7 @@ async def pair_selection_handler(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text(query.message.text, reply_markup=InlineKeyboardMarkup(new_keyboard))
 
 async def confirm_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # ... (الكود لم يتغير)
     query = update.callback_query
     selected_pairs = bot_state['selected_for_monitoring']
     if not selected_pairs:
@@ -255,6 +278,7 @@ async def confirm_selection_handler(update: Update, context: ContextTypes.DEFAUL
     await query.edit_message_text(message)
 
 async def cancel_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # ... (الكود لم يتغير)
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("تم إلغاء عملية الاختيار.")
@@ -262,6 +286,7 @@ async def cancel_selection_handler(update: Update, context: ContextTypes.DEFAULT
 # --- 5. منطق إعدادات الاستراتيجية المتقدمة ---
 
 async def strategy_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (الكود لم يتغير)
     s = bot_state['strategy_settings']
     text = (f"**⚙️ إعدادات الاستراتيجية الحالية:**\n\n"
             f"- مستوى الثقة: {s['signal_threshold']} مؤشرات\n"
@@ -275,13 +300,13 @@ async def strategy_settings_menu(update: Update, context: ContextTypes.DEFAULT_T
         [InlineKeyboardButton("✖️ إغلاق", callback_data='close_menu')]
     ])
     
-    # التحقق من مصدر الاستدعاء (زر رد أو زر مضمن)
     if hasattr(update, 'callback_query') and update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
     else:
         await update.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def set_confidence_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (الكود لم يتغير)
     query = update.callback_query
     await query.answer()
     keyboard = InlineKeyboardMarkup([
@@ -292,6 +317,7 @@ async def set_confidence_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.edit_message_text("اختر الحد الأدنى من المؤشرات المتوافقة لإرسال إشارة:", reply_markup=keyboard)
 
 async def set_threshold_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (الكود لم يتغير)
     query = update.callback_query
     threshold = int(query.data.split('_')[-1])
     bot_state['strategy_settings']['signal_threshold'] = threshold
@@ -299,6 +325,7 @@ async def set_threshold_handler(update: Update, context: ContextTypes.DEFAULT_TY
     await strategy_settings_menu(update, context)
 
 async def edit_indicator_values_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (الكود لم يتغير)
     query = update.callback_query
     await query.answer()
     keyboard = InlineKeyboardMarkup([
@@ -310,6 +337,7 @@ async def edit_indicator_values_menu(update: Update, context: ContextTypes.DEFAU
     await query.edit_message_text("اختر المؤشر الذي تريد تعديل قيمه:", reply_markup=keyboard)
 
 async def edit_indicator_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (الكود لم يتغير)
     query = update.callback_query
     indicator = query.data.split('_')[1]
     bot_state['awaiting_input'] = indicator
@@ -324,26 +352,15 @@ async def edit_indicator_prompt(update: Update, context: ContextTypes.DEFAULT_TY
     bot_state['message_to_delete'] = msg.message_id
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (الكود لم يتغير)
     text = update.message.text
     
-    # معالجة أزرار الرد أولاً
-    if text == "▶️ تشغيل":
-        await start_bot(update, context)
-        return
-    if text == "⏸️ إيقاف":
-        await stop_bot(update, context)
-        return
-    if text == "📊 تحليل السوق":
-        await market_analysis_handler(update, context)
-        return
-    if text == "⚙️ الإعدادات":
-        await strategy_settings_menu(update, context)
-        return
-    if text == "ℹ️ الحالة":
-        await show_status(update, context)
-        return
+    if text == "▶️ تشغيل": await start_bot(update, context); return
+    if text == "⏸️ إيقاف": await stop_bot(update, context); return
+    if text == "📊 تحليل السوق": await market_analysis_handler(update, context); return
+    if text == "⚙️ الإعدادات": await strategy_settings_menu(update, context); return
+    if text == "ℹ️ الحالة": await show_status(update, context); return
         
-    # إذا لم يكن زر رد، تحقق إذا كنا ننتظر إدخالاً
     if bot_state.get('awaiting_input') is None:
         await update.message.reply_text("أمر غير مفهوم. الرجاء استخدام الأزرار في الأسفل.")
         return
@@ -377,6 +394,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await strategy_settings_menu(update, context)
 
 async def cancel_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (الكود لم يتغير)
     bot_state['awaiting_input'] = None
     if bot_state.get('message_to_delete'):
         try:
@@ -388,12 +406,14 @@ async def cancel_input_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await strategy_settings_menu(update, context)
 
 async def reset_strategy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (الكود لم يتغير)
     query = update.callback_query
     bot_state['strategy_settings'] = DEFAULT_STRATEGY_SETTINGS.copy()
     await query.answer("تم إعادة تعيين جميع الإعدادات إلى الوضع الافتراضي.", show_alert=True)
     await strategy_settings_menu(update, context)
 
 async def close_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (الكود لم يتغير)
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("تم إغلاق القائمة.")
@@ -401,11 +421,13 @@ async def close_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # --- 6. مهمة التحقق من الإشارات الرئيسية ---
 
 async def check_signals_task(context: ContextTypes.DEFAULT_TYPE) -> None:
+    # ... (الكود لم يتغير)
     if not bot_state['is_running'] or not bot_state['active_pairs']: return
     current_time = datetime.now(pytz.utc)
     seconds_to_next_minute = 60 - current_time.second
     
     async def run_check(is_pre_alert):
+        # ...
         tasks = [fetch_data(pair) for pair in bot_state['active_pairs']]
         results = await asyncio.gather(*tasks)
         for pair, df in zip(bot_state['active_pairs'], results):
@@ -435,15 +457,14 @@ async def check_signals_task(context: ContextTypes.DEFAULT_TYPE) -> None:
 # --- 7. إعداد خادم الويب وتشغيل البوت ---
 app = Flask(__name__)
 @app.route('/health')
-def health_check():
-    return "Bot is running", 200
-
+def health_check(): return "Bot is running", 200
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
 # --- 8. الوظيفة الرئيسية (Main Function) ---
 def main() -> None:
+    # ... (الكود لم يتغير)
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.start()
     logger.info("بدء تشغيل خادم الويب لإبقاء الخدمة مستيقظة...")
@@ -454,13 +475,10 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("cancel", cancel_input_handler))
     
-    # Inline Keyboard Handlers
     application.add_handler(CallbackQueryHandler(pair_selection_handler, pattern='^select_'))
     application.add_handler(CallbackQueryHandler(confirm_selection_handler, pattern='^confirm_selection$'))
     application.add_handler(CallbackQueryHandler(cancel_selection_handler, pattern='^cancel_selection$'))
     application.add_handler(CallbackQueryHandler(close_menu_handler, pattern='^close_menu$'))
-
-    # Strategy settings handlers (Inline)
     application.add_handler(CallbackQueryHandler(strategy_settings_menu, pattern='^back_to_strategy_settings$'))
     application.add_handler(CallbackQueryHandler(set_confidence_menu, pattern='^set_confidence$'))
     application.add_handler(CallbackQueryHandler(set_threshold_handler, pattern='^set_thresh_'))
@@ -468,7 +486,6 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(edit_indicator_prompt, pattern='^edit_'))
     application.add_handler(CallbackQueryHandler(reset_strategy_handler, pattern='^reset_strategy$'))
     
-    # Text input handler (Handles both Reply Keyboard and strategy values)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
 
     application.job_queue.run_repeating(check_signals_task, interval=1, first=5)
