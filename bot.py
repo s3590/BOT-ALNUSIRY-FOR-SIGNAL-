@@ -16,8 +16,8 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 # --- متغيرات البيئة (يجب إضافتها في Render) ---
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-TWELVE_DATA_API_KEY_1 = os.getenv('TWELVE_DATA_API_KEY_1')
-TWELVE_DATA_API_KEY_2 = os.getenv('TWELVE_DATA_API_KEY_2')
+API_KEY_1 = os.getenv('API_KEY_1')
+API_KEY_2 = os.getenv('API_KEY_2')
 
 API_KEYS = [key for key in [TWELVE_DATA_API_KEY_1, TWELVE_DATA_API_KEY_2] if key]
 
@@ -495,3 +495,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
