@@ -8,7 +8,7 @@ import pandas_ta as ta
 from flask import Flask
 import threading
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 # --- 1. إعدادات البوت والمتغيرات الأساسية ---
@@ -156,20 +156,39 @@ async def send_pre_signal_alert(context: ContextTypes.DEFAULT_TYPE, chat_id, pai
 
 # --- 3. وظائف لوحة التحكم الرئيسية ---
 
-# ---  (جديد) تعريف أزرار الرد ---
-REPLY_KEYBOARD_MARKUP = ReplyKeyboardMarkup([
-    ["▶️ تشغيل", "⏸️ إيقاف"],
-    ["📊 تحليل السوق", "⚙️ الإعدادات"],
-    ["ℹ️ الحالة"]
-], resize_keyboard=True)
+def get_main_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("▶️ تشغيل المراقبة", callback_data='start_bot'), InlineKeyboardButton("⏸️ إيقاف المراقبة", callback_data='stop_bot')],
+        [InlineKeyboardButton("📊 تحليل السوق واختيار الأزواج", callback_data='market_analysis')],
+        [InlineKeyboardButton("⚙️ إعدادات الاستراتيجية", callback_data='strategy_settings')],
+        [InlineKeyboardButton("ℹ️ عرض الحالة", callback_data='show_status')],
+    ])
+
+async def show_main_menu(update: Update, text: str):
+    # وظيفة موحدة لعرض القائمة الرئيسية مع لوحة مفاتيح مضمنة
+    if update.callback_query:
+        # إذا كان التحديث قادمًا من زر، قم بتحرير الرسالة
+        try:
+            await update.callback_query.edit_message_text(text, reply_markup=get_main_keyboard(), parse_mode='Markdown')
+        except Exception as e:
+            logger.warning(f"Failed to edit message: {e}. Sending new message instead.")
+            await update.callback_query.message.reply_text(text, reply_markup=get_main_keyboard(), parse_mode='Markdown')
+
+    else:
+        # إذا كان التحديث قادمًا من أمر نصي، أرسل رسالة جديدة
+        await update.message.reply_text(text, reply_markup=get_main_keyboard(), parse_mode='Markdown')
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
-        "أهلاً بك في بوت النصيري (نسخة مطورة)!\n\nاستخدم الأزرار في الأسفل للتحكم.",
-        reply_markup=REPLY_KEYBOARD_MARKUP
-    )
+    await show_main_menu(update, "أهلاً بك في بوت النصيري (نسخة مطورة)!")
+
+async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await show_main_menu(update, "القائمة الرئيسية")
 
 async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query: await query.answer()
     active_pairs_str = ", ".join(bot_state['active_pairs']) if bot_state['active_pairs'] else "لا توجد أزواج قيد المراقبة."
     status_message = (
         f"**📊 حالة بوت النصيري:**\n\n"
@@ -177,31 +196,37 @@ async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         f"الأزواج قيد المراقبة: {active_pairs_str}\n"
         f"مستوى الثقة المطلوب: {bot_state['strategy_settings']['signal_threshold']} مؤشرات"
     )
-    await update.message.reply_text(status_message, parse_mode='Markdown')
+    await show_main_menu(update, status_message)
 
 async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
     if not bot_state['active_pairs']:
-        await update.message.reply_text("❌ لا يمكن بدء المراقبة. الرجاء تحليل السوق واختيار زوج واحد على الأقل أولاً.")
+        await query.edit_message_text("❌ لا يمكن بدء المراقبة. الرجاء تحليل السوق واختيار زوج واحد على الأقل أولاً.", reply_markup=get_main_keyboard())
         return
     if not bot_state['is_running']:
         bot_state['is_running'] = True
-        await update.message.reply_text(f"✅ تم تشغيل المراقبة لـ: {', '.join(bot_state['active_pairs'])}")
+        await query.edit_message_text(f"✅ تم تشغيل المراقبة لـ: {', '.join(bot_state['active_pairs'])}", reply_markup=get_main_keyboard())
         logger.info("المراقبة بدأت.")
     else:
-        await update.message.reply_text("البوت يعمل بالفعل.")
+        await query.answer("البوت يعمل بالفعل.", show_alert=True)
 
 async def stop_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
     if bot_state['is_running']:
         bot_state['is_running'] = False
-        await update.message.reply_text("⏸️ تم إيقاف المراقبة.")
+        await query.edit_message_text("⏸️ تم إيقاف المراقبة.", reply_markup=get_main_keyboard())
         logger.info("المراقبة توقفت.")
     else:
-        await update.message.reply_text("البوت متوقف بالفعل.")
+        await query.answer("البوت متوقف بالفعل.", show_alert=True)
 
 # --- 4. منطق تحليل السوق التفاعلي ---
 
 async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("⏳ جاري تحليل السوق لتحديد الأزواج النشطة...")
+    query = update.callback_query
+    await query.answer("جاري تحليل السوق... قد يستغرق الأمر بعض الوقت.")
+    await query.edit_message_text("⏳ جاري تحليل السوق لتحديد الأزواج النشطة...")
     tasks = [fetch_data(pair) for pair in BASE_PAIRS]
     results = await asyncio.gather(*tasks)
     active_pairs_found = []
@@ -213,13 +238,13 @@ async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_
                 if (latest_data['ATR'] / latest_data['close']) > s['atr_threshold_ratio']:
                     active_pairs_found.append(pair)
     if not active_pairs_found:
-        await update.message.reply_text("لم يتم العثور على أزواج نشطة حاليًا. حاول مرة أخرى لاحقًا.")
+        await query.edit_message_text("لم يتم العثور على أزواج نشطة حاليًا. حاول مرة أخرى لاحقًا.", reply_markup=get_main_keyboard())
         return
     bot_state['selected_for_monitoring'] = set()
     keyboard = [[InlineKeyboardButton(f"🔲 {pair}", callback_data=f"select_{pair}")] for pair in active_pairs_found]
     keyboard.append([InlineKeyboardButton("✅ بدء المراقبة بهذه الأزواج", callback_data="confirm_selection")])
-    keyboard.append([InlineKeyboardButton("✖️ إلغاء", callback_data="cancel_selection")])
-    await update.message.reply_text("**تحليل السوق اكتمل.**\n\nالرجاء تحديد الأزواج التي تريد مراقبتها:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    keyboard.append([InlineKeyboardButton("🔙 إلغاء", callback_data="main_menu")])
+    await query.edit_message_text("**تحليل السوق اكتمل.**\n\nالرجاء تحديد الأزواج التي تريد مراقبتها:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def pair_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -253,16 +278,13 @@ async def confirm_selection_handler(update: Update, context: ContextTypes.DEFAUL
     bot_state['active_pairs'] = list(selected_pairs)
     bot_state['is_running'] = True
     message = f"✅ تم تحديث القائمة وبدء المراقبة.\n\nالأزواج قيد المراقبة الآن:\n" + "\n".join(f"- {p}" for p in bot_state['active_pairs'])
-    await query.edit_message_text(message)
-
-async def cancel_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("تم إلغاء عملية الاختيار.")
+    await query.edit_message_text(message, reply_markup=get_main_keyboard())
 
 # --- 5. منطق إعدادات الاستراتيجية المتقدمة ---
 
 async def strategy_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
     s = bot_state['strategy_settings']
     text = (f"**⚙️ إعدادات الاستراتيجية الحالية:**\n\n"
             f"- مستوى الثقة: {s['signal_threshold']} مؤشرات\n"
@@ -273,15 +295,9 @@ async def strategy_settings_menu(update: Update, context: ContextTypes.DEFAULT_T
         [InlineKeyboardButton(f"⭐ مستوى الثقة ({s['signal_threshold']})", callback_data='set_confidence')],
         [InlineKeyboardButton("🔧 قيم المؤشرات", callback_data='edit_indicator_values')],
         [InlineKeyboardButton("🔄 إعادة تعيين الكل", callback_data='reset_strategy')],
-        [InlineKeyboardButton("✖️ إغلاق", callback_data='close_menu')]
+        [InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data='main_menu')]
     ])
-    
-    # تحديد هل نرسل رسالة جديدة أم نعدل رسالة موجودة
-    if isinstance(update.message, Update): # قادم من زر رد
-        await update.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
-    else: # قادم من زر مضمن
-        await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
-
+    await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def set_confidence_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -289,7 +305,7 @@ async def set_confidence_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("★★☆☆ (مؤشرين)", callback_data='set_thresh_2')],
         [InlineKeyboardButton("★★★☆ (ثلاثة مؤشرات)", callback_data='set_thresh_3')],
-        [InlineKeyboardButton("🔙 رجوع", callback_data='back_to_strategy_settings')]
+        [InlineKeyboardButton("🔙 رجوع", callback_data='strategy_settings')]
     ])
     await query.edit_message_text("اختر الحد الأدنى من المؤشرات المتوافقة لإرسال إشارة:", reply_markup=keyboard)
 
@@ -307,7 +323,7 @@ async def edit_indicator_values_menu(update: Update, context: ContextTypes.DEFAU
         [InlineKeyboardButton("EMA", callback_data='edit_ema')],
         [InlineKeyboardButton("RSI", callback_data='edit_rsi')],
         [InlineKeyboardButton("Stochastic", callback_data='edit_stoch')],
-        [InlineKeyboardButton("🔙 رجوع", callback_data='back_to_strategy_settings')]
+        [InlineKeyboardButton("🔙 رجوع", callback_data='strategy_settings')]
     ])
     await query.edit_message_text("اختر المؤشر الذي تريد تعديل قيمه:", reply_markup=keyboard)
 
@@ -326,27 +342,8 @@ async def edit_indicator_prompt(update: Update, context: ContextTypes.DEFAULT_TY
     bot_state['message_to_delete'] = msg.message_id
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # تحقق إذا كان النص مطابقًا لأحد أزرار الرد
-    text = update.message.text
-    if text == "▶️ تشغيل":
-        await start_bot(update, context)
-        return
-    if text == "⏸️ إيقاف":
-        await stop_bot(update, context)
-        return
-    if text == "📊 تحليل السوق":
-        await market_analysis_handler(update, context)
-        return
-    if text == "⚙️ الإعدادات":
-        await strategy_settings_menu(update, context)
-        return
-    if text == "ℹ️ الحالة":
-        await show_status(update, context)
-        return
-        
-    # إذا لم يكن كذلك، تحقق إذا كنا ننتظر إدخالاً
     if bot_state.get('awaiting_input') is None:
-        await update.message.reply_text("أمر غير مفهوم. الرجاء استخدام الأزرار في الأسفل.")
+        await update.message.reply_text("أمر غير مفهوم. الرجاء استخدام الأزرار.")
         return
 
     indicator = bot_state['awaiting_input']
@@ -375,8 +372,15 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"Could not delete message: {e}")
         bot_state['message_to_delete'] = None
     
-    # إعادة عرض قائمة الإعدادات
-    await strategy_settings_menu(update, context)
+    # Fake update to call the menu again
+    class FakeQuery:
+        async def answer(self, *args, **kwargs): pass
+    class FakeUpdate:
+        def __init__(self, message):
+            self.callback_query = FakeQuery()
+            self.callback_query.message = message
+    
+    await strategy_settings_menu(FakeUpdate(update.message), context)
 
 async def cancel_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_state['awaiting_input'] = None
@@ -387,18 +391,21 @@ async def cancel_input_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.warning(f"Could not delete message: {e}")
         bot_state['message_to_delete'] = None
     await update.message.reply_text("تم إلغاء العملية.")
-    await strategy_settings_menu(update, context)
+    
+    class FakeQuery:
+        async def answer(self, *args, **kwargs): pass
+    class FakeUpdate:
+        def __init__(self, message):
+            self.callback_query = FakeQuery()
+            self.callback_query.message = message
+            
+    await strategy_settings_menu(FakeUpdate(update.message), context)
 
 async def reset_strategy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     bot_state['strategy_settings'] = DEFAULT_STRATEGY_SETTINGS.copy()
     await query.answer("تم إعادة تعيين جميع الإعدادات إلى الوضع الافتراضي.", show_alert=True)
     await strategy_settings_menu(update, context)
-
-async def close_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("تم إغلاق القائمة.")
 
 # --- 6. مهمة التحقق من الإشارات الرئيسية ---
 
@@ -456,21 +463,23 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("cancel", cancel_input_handler))
     
-    # Inline Keyboard Handlers
+    application.add_handler(CallbackQueryHandler(main_menu_callback, pattern='^main_menu$'))
+    application.add_handler(CallbackQueryHandler(start_bot, pattern='^start_bot$'))
+    application.add_handler(CallbackQueryHandler(stop_bot, pattern='^stop_bot$'))
+    application.add_handler(CallbackQueryHandler(show_status, pattern='^show_status$'))
+    application.add_handler(CallbackQueryHandler(market_analysis_handler, pattern='^market_analysis$'))
     application.add_handler(CallbackQueryHandler(pair_selection_handler, pattern='^select_'))
     application.add_handler(CallbackQueryHandler(confirm_selection_handler, pattern='^confirm_selection$'))
-    application.add_handler(CallbackQueryHandler(cancel_selection_handler, pattern='^cancel_selection$'))
-    application.add_handler(CallbackQueryHandler(close_menu_handler, pattern='^close_menu$'))
-
-    # Strategy settings handlers (Inline)
-    application.add_handler(CallbackQueryHandler(strategy_settings_menu, pattern='^back_to_strategy_settings$'))
+    
+    # Strategy settings handlers
+    application.add_handler(CallbackQueryHandler(strategy_settings_menu, pattern='^strategy_settings$'))
     application.add_handler(CallbackQueryHandler(set_confidence_menu, pattern='^set_confidence$'))
     application.add_handler(CallbackQueryHandler(set_threshold_handler, pattern='^set_thresh_'))
     application.add_handler(CallbackQueryHandler(edit_indicator_values_menu, pattern='^edit_indicator_values$'))
     application.add_handler(CallbackQueryHandler(edit_indicator_prompt, pattern='^edit_'))
     application.add_handler(CallbackQueryHandler(reset_strategy_handler, pattern='^reset_strategy$'))
     
-    # Text input handler (Handles both Reply Keyboard and strategy values)
+    # Text input handler for strategy values
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
 
     application.job_queue.run_repeating(check_signals_task, interval=1, first=5)
