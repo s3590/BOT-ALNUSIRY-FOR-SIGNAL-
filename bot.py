@@ -5,8 +5,6 @@ from datetime import datetime
 import pytz
 import pandas as pd
 import pandas_ta as ta
-from flask import Flask
-import threading
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
@@ -47,7 +45,8 @@ bot_state = {
 
 async def send_error_to_telegram(context: ContextTypes.DEFAULT_TYPE, error_message: str):
     logger.error(error_message)
-    await context.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔴 **خطأ في البوت** 🔴\n\n{error_message}", parse_mode='Markdown')
+    if TELEGRAM_CHAT_ID:
+        await context.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔴 **خطأ في البوت** 🔴\n\n{error_message}", parse_mode='Markdown')
 
 # --- 2. وظائف مساعدة واستراتيجية ---
 
@@ -75,11 +74,11 @@ def calculate_indicators(df):
     df.ta.rsi(length=s['rsi_length'], append=True, col_names=('RSI',))
     df.ta.stoch(k=s['stoch_k'], d=s['stoch_d'], smooth_k=s['stoch_smooth_k'], append=True, col_names=('STOCHk', 'STOCHd'))
     df.ta.atr(length=s['atr_length'], append=True, col_names=('ATR',))
-    return df # نرجع كامل الـ DataFrame بدلاً من آخر صف فقط
+    return df
 
 def check_strategy(data):
     if data is None: return None
-    latest_data = data.iloc[0] # نأخذ آخر صف هنا
+    latest_data = data.iloc[0]
     s = bot_state['strategy_settings']
     signals = {'buy': [], 'sell': []}
     close_price = latest_data['close']
@@ -102,7 +101,7 @@ def check_strategy(data):
 
 def get_display_pair(pair):
     today = datetime.now(pytz.utc).weekday()
-    if today == 5 or today == 6:
+    if today == 5 or today == 6: # 5: Saturday, 6: Sunday
         return f"{pair} OTC"
     return pair
 
@@ -149,11 +148,8 @@ REPLY_KEYBOARD_MARKUP = ReplyKeyboardMarkup([
 ], resize_keyboard=True)
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not API_KEYS:
-        await send_error_to_telegram(context, "لم يتم العثور على أي مفاتيح API في متغيرات البيئة. لن يعمل تحليل السوق.")
-    
     await update.message.reply_text(
-        "أهلاً بك في بوت النصيري (نسخة مطورة)!\n\nاستخدم الأزرار في الأسفل للتحكم.",
+        "أهلاً بك في بوت النصيري (نسخة مستقرة)!\n\nاستخدم الأزرار في الأسفل للتحكم.",
         reply_markup=REPLY_KEYBOARD_MARKUP
     )
 
@@ -193,7 +189,7 @@ async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_
         await send_error_to_telegram(context, "فشل تحليل السوق لأنه لم يتم العثور على مفاتيح API.")
         return
 
-    await update.message.reply_text("⏳ جاري تحليل السوق لتحديد الأزواج النشطة...")
+    msg = await update.message.reply_text("⏳ جاري تحليل السوق لتحديد الأزواج النشطة...")
     tasks = [fetch_data(pair) for pair in BASE_PAIRS]
     results = await asyncio.gather(*tasks)
     
@@ -201,28 +197,29 @@ async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_
 
     if data_found_count == 0:
         await send_error_to_telegram(context, "فشل تحليل السوق: لم يتمكن البوت من جلب البيانات لأي زوج. قد تكون مفاتيح API غير صالحة أو أن هناك مشكلة في الاتصال بـ Twelve Data.")
+        await msg.delete()
         return
 
     active_pairs_found = []
     s = bot_state['strategy_settings']
     for pair, df in zip(BASE_PAIRS, results):
         if df is not None and not df.empty:
-            # === (هنا التعديل الجوهري) ===
-            # نحسب المؤشرات على كامل البيانات
-            full_data_with_indicators = calculate_indicators(df.copy()) # نستخدم نسخة لتجنب التعديل على الأصل
+            full_data_with_indicators = calculate_indicators(df.copy())
             
             if full_data_with_indicators is not None:
-                # نأخذ أحدث قيمة صالحة لمؤشر ATR (ليست nan)
-                latest_valid_atr = full_data_with_indicators['ATR'].dropna().iloc[-1]
-                latest_close = full_data_with_indicators['close'].iloc[0]
+                latest_valid_atr_series = full_data_with_indicators['ATR'].dropna()
+                if not latest_valid_atr_series.empty:
+                    latest_valid_atr = latest_valid_atr_series.iloc[-1]
+                    latest_close = full_data_with_indicators['close'].iloc[0]
 
-                if latest_close > 0:
-                    volatility_ratio = latest_valid_atr / latest_close
-                    logger.info(f"[{pair}] Checking volatility: Ratio={volatility_ratio:.6f} > Threshold={s['atr_threshold_ratio']:.6f} ?")
-                    
-                    if volatility_ratio > s['atr_threshold_ratio']:
-                        active_pairs_found.append(pair)
+                    if latest_close > 0:
+                        volatility_ratio = latest_valid_atr / latest_close
+                        logger.info(f"[{pair}] Checking volatility: Ratio={volatility_ratio:.6f} > Threshold={s['atr_threshold_ratio']:.6f} ?")
+                        
+                        if volatility_ratio > s['atr_threshold_ratio']:
+                            active_pairs_found.append(pair)
     
+    await msg.delete()
     if not active_pairs_found:
         await update.message.reply_text("تحليل السوق اكتمل: لم يتم العثور على أزواج نشطة حاليًا (السوق هادئ). حاول مرة أخرى لاحقًا.")
         return
@@ -437,20 +434,15 @@ async def check_signals_task(context: ContextTypes.DEFAULT_TYPE) -> None:
     if current_time.second in [2, 3] and current_time.minute % 5 == 0:
         await run_check(is_pre_alert=False)
 
-# --- 7. إعداد خادم الويب وتشغيل البوت ---
-app = Flask(__name__)
-@app.route('/health')
-def health_check(): return "Bot is running", 200
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
-
-# --- 8. الوظيفة الرئيسية (Main Function) ---
+# --- 7. الوظيفة الرئيسية (Main Function) ---
 def main() -> None:
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.start()
-    logger.info("بدء تشغيل خادم الويب لإبقاء الخدمة مستيقظة...")
+    logger.info("Verifying environment variables...")
+    if not all([TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, API_KEY_1, API_KEY_2]):
+        logger.critical("FATAL ERROR: One or more environment variables are missing!")
+        return 
 
+    logger.info("All environment variables found. Initializing application...")
+    
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     
     application.add_handler(CommandHandler("start", start_command))
@@ -471,7 +463,7 @@ def main() -> None:
 
     application.job_queue.run_repeating(check_signals_task, interval=1, first=5)
     
-    logger.info("بدء تشغيل بوت التليجرام (نسخة مطورة)...")
+    logger.info("Starting Telegram Bot Polling (Stable Mode)...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
