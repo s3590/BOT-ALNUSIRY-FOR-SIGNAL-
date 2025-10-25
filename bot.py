@@ -75,26 +75,27 @@ def calculate_indicators(df):
     df.ta.rsi(length=s['rsi_length'], append=True, col_names=('RSI',))
     df.ta.stoch(k=s['stoch_k'], d=s['stoch_d'], smooth_k=s['stoch_smooth_k'], append=True, col_names=('STOCHk', 'STOCHd'))
     df.ta.atr(length=s['atr_length'], append=True, col_names=('ATR',))
-    return df.iloc[0]
+    return df # نرجع كامل الـ DataFrame بدلاً من آخر صف فقط
 
 def check_strategy(data):
     if data is None: return None
+    latest_data = data.iloc[0] # نأخذ آخر صف هنا
     s = bot_state['strategy_settings']
     signals = {'buy': [], 'sell': []}
-    close_price = data['close']
+    close_price = latest_data['close']
     
-    if 'EMA' in data and not pd.isna(data['EMA']):
-        if close_price > data['EMA']: signals['buy'].append('EMA')
-        if close_price < data['EMA']: signals['sell'].append('EMA')
+    if 'EMA' in latest_data and not pd.isna(latest_data['EMA']):
+        if close_price > latest_data['EMA']: signals['buy'].append('EMA')
+        if close_price < latest_data['EMA']: signals['sell'].append('EMA')
         
-    if 'RSI' in data and not pd.isna(data['RSI']):
-        if data['RSI'] < s['rsi_oversold']: signals['buy'].append('RSI')
-        if data['RSI'] > s['rsi_overbought']: signals['sell'].append('RSI')
+    if 'RSI' in latest_data and not pd.isna(latest_data['RSI']):
+        if latest_data['RSI'] < s['rsi_oversold']: signals['buy'].append('RSI')
+        if latest_data['RSI'] > s['rsi_overbought']: signals['sell'].append('RSI')
         
-    if 'STOCHk' in data and 'STOCHd' in data and not pd.isna(data['STOCHk']) and not pd.isna(data['STOCHd']):
-        if data['STOCHk'] < s['stoch_oversold'] and data['STOCHd'] < s['stoch_oversold'] and data['STOCHk'] > data['STOCHd']:
+    if 'STOCHk' in latest_data and 'STOCHd' in latest_data and not pd.isna(latest_data['STOCHk']) and not pd.isna(latest_data['STOCHd']):
+        if latest_data['STOCHk'] < s['stoch_oversold'] and latest_data['STOCHd'] < s['stoch_oversold'] and latest_data['STOCHk'] > latest_data['STOCHd']:
             signals['buy'].append('Stochastic')
-        if data['STOCHk'] > s['stoch_overbought'] and data['STOCHd'] > s['stoch_overbought'] and data['STOCHk'] < data['STOCHd']:
+        if latest_data['STOCHk'] > s['stoch_overbought'] and latest_data['STOCHd'] > s['stoch_overbought'] and latest_data['STOCHk'] < latest_data['STOCHd']:
             signals['sell'].append('Stochastic')
             
     return signals
@@ -206,14 +207,21 @@ async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_
     s = bot_state['strategy_settings']
     for pair, df in zip(BASE_PAIRS, results):
         if df is not None and not df.empty:
-            latest_data = calculate_indicators(df)
-            if latest_data is not None and 'ATR' in latest_data and 'close' in latest_data and latest_data['close'] > 0:
-                # --- (هنا التعديل) إضافة طباعة تشخيصية ---
-                volatility_ratio = latest_data['ATR'] / latest_data['close']
-                logger.info(f"[{pair}] Checking volatility: Ratio={volatility_ratio:.6f} > Threshold={s['atr_threshold_ratio']:.6f} ?")
-                
-                if volatility_ratio > s['atr_threshold_ratio']:
-                    active_pairs_found.append(pair)
+            # === (هنا التعديل الجوهري) ===
+            # نحسب المؤشرات على كامل البيانات
+            full_data_with_indicators = calculate_indicators(df.copy()) # نستخدم نسخة لتجنب التعديل على الأصل
+            
+            if full_data_with_indicators is not None:
+                # نأخذ أحدث قيمة صالحة لمؤشر ATR (ليست nan)
+                latest_valid_atr = full_data_with_indicators['ATR'].dropna().iloc[-1]
+                latest_close = full_data_with_indicators['close'].iloc[0]
+
+                if latest_close > 0:
+                    volatility_ratio = latest_valid_atr / latest_close
+                    logger.info(f"[{pair}] Checking volatility: Ratio={volatility_ratio:.6f} > Threshold={s['atr_threshold_ratio']:.6f} ?")
+                    
+                    if volatility_ratio > s['atr_threshold_ratio']:
+                        active_pairs_found.append(pair)
     
     if not active_pairs_found:
         await update.message.reply_text("تحليل السوق اكتمل: لم يتم العثور على أزواج نشطة حاليًا (السوق هادئ). حاول مرة أخرى لاحقًا.")
@@ -407,11 +415,11 @@ async def check_signals_task(context: ContextTypes.DEFAULT_TYPE) -> None:
         results = await asyncio.gather(*tasks)
         for pair, df in zip(bot_state['active_pairs'], results):
             if df is not None and not df.empty:
-                latest_data = calculate_indicators(df)
-                if latest_data is not None:
-                    signals = check_strategy(latest_data)
+                data_with_indicators = calculate_indicators(df)
+                if data_with_indicators is not None:
+                    signals = check_strategy(data_with_indicators)
                     buy_conf, sell_conf = len(signals['buy']), len(signals['sell'])
-                    candle_time = latest_data['datetime']
+                    candle_time = data_with_indicators.iloc[0]['datetime']
                     if pair not in bot_state['last_signal_time'] or bot_state['last_signal_time'].get(pair) < candle_time:
                         s_thresh = bot_state['strategy_settings']['signal_threshold']
                         if buy_conf >= s_thresh and buy_conf > sell_conf:
