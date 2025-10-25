@@ -51,6 +51,7 @@ async def send_error_to_telegram(context: ContextTypes.DEFAULT_TYPE, error_messa
 # --- 2. وظائف مساعدة واستراتيجية ---
 
 def get_next_api_key():
+    if not API_KEYS: return None
     key = API_KEYS[bot_state['api_key_index']]
     bot_state['api_key_index'] = (bot_state['api_key_index'] + 1) % len(API_KEYS)
     return key
@@ -58,6 +59,7 @@ def get_next_api_key():
 async def fetch_data(pair):
     try:
         api_key = get_next_api_key()
+        if not api_key: return None
         from twelvedata import TDClient
         td = TDClient(apikey=api_key)
         ts = td.time_series(symbol=pair, interval="5min", outputsize=200, timezone="UTC")
@@ -72,11 +74,7 @@ def calculate_indicators(df):
     s = bot_state['strategy_settings']
     df.ta.ema(length=s['ema_length'], append=True, col_names=('EMA',))
     df.ta.rsi(length=s['rsi_length'], append=True, col_names=('RSI',))
-    
-    # --- هذا هو السطر الذي تم تصحيحه ---
     df.ta.stoch(k=s['stoch_k'], d=s['stoch_d'], smooth_k=s['stoch_smooth_k'], append=True, col_names=('STOCHk', 'STOCHd'))
-    # ---------------------------------
-
     df.ta.atr(length=s['atr_length'], append=True, col_names=('ATR',))
     return df
 
@@ -211,10 +209,13 @@ async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_
             full_data_with_indicators = calculate_indicators(df.copy())
             
             if full_data_with_indicators is not None:
+                # --- هذا هو السطر الذي تم تصحيحه ---
                 latest_valid_atr_series = full_data_with_indicators['ATR'].dropna()
                 if not latest_valid_atr_series.empty:
-                    latest_valid_atr = latest_valid_atr_series.iloc[-1]
+                    # نأخذ أول قيمة صالحة من السلسلة (التي هي أحدث شمعة)
+                    latest_valid_atr = latest_valid_atr_series.iloc[0] 
                     latest_close = full_data_with_indicators['close'].iloc[0]
+                # ---------------------------------
 
                     if latest_close > 0:
                         volatility_ratio = latest_valid_atr / latest_close
@@ -361,10 +362,16 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             s['ema_length'] = int(user_input)
         elif indicator == 'rsi':
             parts = [int(p.strip()) for p in user_input.split(',')]
+            if len(parts) != 3: raise ValueError("RSI expects 3 values")
             s['rsi_length'], s['rsi_oversold'], s['rsi_overbought'] = parts
+        
+        # --- هذا هو السطر الذي تم تصحيحه ---
         elif indicator == 'stoch':
             parts = [int(p.strip()) for p in user_input.split(',')]
+            if len(parts) != 3: raise ValueError("Stochastic expects 3 values")
             s['stoch_k'], s['stoch_d'], s['stoch_smooth_k'] = parts
+        # ---------------------------------
+
         elif indicator == 'atr':
             s['atr_threshold_ratio'] = float(user_input)
         
