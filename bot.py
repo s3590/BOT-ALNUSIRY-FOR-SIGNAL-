@@ -208,7 +208,11 @@ async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_
         if df is not None and not df.empty:
             latest_data = calculate_indicators(df)
             if latest_data is not None and 'ATR' in latest_data and 'close' in latest_data and latest_data['close'] > 0:
-                if (latest_data['ATR'] / latest_data['close']) > s['atr_threshold_ratio']:
+                # --- (هنا التعديل) إضافة طباعة تشخيصية ---
+                volatility_ratio = latest_data['ATR'] / latest_data['close']
+                logger.info(f"[{pair}] Checking volatility: Ratio={volatility_ratio:.6f} > Threshold={s['atr_threshold_ratio']:.6f} ?")
+                
+                if volatility_ratio > s['atr_threshold_ratio']:
                     active_pairs_found.append(pair)
     
     if not active_pairs_found:
@@ -306,7 +310,7 @@ async def edit_indicator_values_menu(update: Update, context: ContextTypes.DEFAU
         [InlineKeyboardButton("EMA", callback_data='edit_ema')],
         [InlineKeyboardButton("RSI", callback_data='edit_rsi')],
         [InlineKeyboardButton("Stochastic", callback_data='edit_stoch')],
-        [InlineKeyboardButton("ATR (حساسية السوق)", callback_data='edit_atr')], # <-- الزر الجديد
+        [InlineKeyboardButton("ATR (حساسية السوق)", callback_data='edit_atr')],
         [InlineKeyboardButton("🔙 رجوع", callback_data='back_to_strategy_settings')]
     ])
     await query.edit_message_text("اختر المؤشر الذي تريد تعديل قيمه:", reply_markup=keyboard)
@@ -320,7 +324,7 @@ async def edit_indicator_prompt(update: Update, context: ContextTypes.DEFAULT_TY
         'ema': "أرسل القيمة الجديدة لفترة EMA (مثال: 20)",
         'rsi': "أرسل القيم الجديدة لـ RSI بالتنسيق: فترة,تشبع بيع,تشبع شراء (مثال: 7,25,75)",
         'stoch': "أرسل القيم الجديدة لـ Stochastic بالتنسيق: k,d,smooth_k (مثال: 10,5,5)",
-        'atr': "أرسل القيمة الجديدة لحساسية ATR (مثال: 0.0004)" # <-- الرسالة الجديدة
+        'atr': "أرسل القيمة الجديدة لحساسية ATR (مثال: 0.0004)"
     }
     
     msg = await query.edit_message_text(f"**{prompts[indicator]}**\n\nلإلغاء العملية، أرسل /cancel", parse_mode='Markdown')
@@ -352,7 +356,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif indicator == 'stoch':
             parts = [int(p.strip()) for p in user_input.split(',')]
             s['stoch_k'], s['stoch_d'], s['stoch_smooth_k'] = parts
-        elif indicator == 'atr': # <-- المنطق الجديد
+        elif indicator == 'atr':
             s['atr_threshold_ratio'] = float(user_input)
         
         await update.message.reply_text(f"✅ تم تحديث قيم مؤشر {indicator.upper()} بنجاح.")
