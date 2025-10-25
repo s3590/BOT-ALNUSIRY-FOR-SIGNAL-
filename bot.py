@@ -13,26 +13,19 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 
 # --- 1. إعدادات البوت والمتغيرات الأساسية ---
 
-# --- (تم التعديل) استخدام أسماء أقصر لمفاتيح API ---
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 API_KEY_1 = os.getenv('API_KEY_1')
 API_KEY_2 = os.getenv('API_KEY_2')
 
-# --- (تم التصحيح) استخدام الأسماء الجديدة هنا أيضًا ---
 API_KEYS = [key for key in [API_KEY_1, API_KEY_2] if key]
 
-# --- قائمة الأزواج الأساسية للتحليل ---
 BASE_PAIRS = [
     "EUR/USD", "AUD/USD", "USD/CAD", "USD/CHF", "USD/JPY", "EUR/JPY", 
     "AUD/JPY", "CAD/JPY", "CHF/JPY", "EUR/AUD", "EUR/CAD", "EUR/CHF", 
     "AUD/CAD", "AUD/CHF", "CAD/CHF"
 ]
 
-# ... (بقية الكود لم يتغير وهو صحيح)
-# (سأقوم بلصق بقية الكود للتأكيد)
-
-# --- الإعدادات الافتراضية للاستراتيجية ---
 DEFAULT_STRATEGY_SETTINGS = {
     'signal_threshold': 3, 'ema_length': 50, 'rsi_length': 14,
     'rsi_oversold': 30, 'rsi_overbought': 70, 'stoch_k': 14, 'stoch_d': 3,
@@ -40,14 +33,11 @@ DEFAULT_STRATEGY_SETTINGS = {
     'atr_length': 14, 'atr_threshold_ratio': 0.0005
 }
 
-# --- إعدادات التنبيه ---
 PRE_SIGNAL_ALERT_TIME = 30
 
-# --- إعدادات التسجيل (Logging) ---
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- حالة البوت (يتم تخزينها في الذاكرة) ---
 bot_state = {
     'is_running': False, 'active_pairs': [], 'last_signal_time': {},
     'api_key_index': 0, 'selected_for_monitoring': set(),
@@ -55,7 +45,6 @@ bot_state = {
     'awaiting_input': None, 'message_to_delete': None,
 }
 
-# --- وظيفة إرسال الأخطاء ---
 async def send_error_to_telegram(context: ContextTypes.DEFAULT_TYPE, error_message: str):
     logger.error(error_message)
     await context.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔴 **خطأ في البوت** 🔴\n\n{error_message}", parse_mode='Markdown')
@@ -70,7 +59,6 @@ def get_next_api_key():
 async def fetch_data(pair):
     try:
         api_key = get_next_api_key()
-        # Local import to avoid circular dependency issues if any
         from twelvedata import TDClient
         td = TDClient(apikey=api_key)
         ts = td.time_series(symbol=pair, interval="5min", outputsize=200, timezone="UTC")
@@ -280,7 +268,8 @@ async def strategy_settings_menu(update: Update, context: ContextTypes.DEFAULT_T
             f"- مستوى الثقة: {s['signal_threshold']} مؤشرات\n"
             f"- إعدادات EMA: {s['ema_length']}\n"
             f"- إعدادات RSI: {s['rsi_length']}, {s['rsi_oversold']}/{s['rsi_overbought']}\n"
-            f"- إعدادات Stochastic: {s['stoch_k']},{s['stoch_d']},{s['stoch_smooth_k']}")
+            f"- إعدادات Stochastic: {s['stoch_k']},{s['stoch_d']},{s['stoch_smooth_k']}\n"
+            f"- حساسية ATR: {s['atr_threshold_ratio']}")
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(f"⭐ مستوى الثقة ({s['signal_threshold']})", callback_data='set_confidence')],
         [InlineKeyboardButton("🔧 قيم المؤشرات", callback_data='edit_indicator_values')],
@@ -317,6 +306,7 @@ async def edit_indicator_values_menu(update: Update, context: ContextTypes.DEFAU
         [InlineKeyboardButton("EMA", callback_data='edit_ema')],
         [InlineKeyboardButton("RSI", callback_data='edit_rsi')],
         [InlineKeyboardButton("Stochastic", callback_data='edit_stoch')],
+        [InlineKeyboardButton("ATR (حساسية السوق)", callback_data='edit_atr')], # <-- الزر الجديد
         [InlineKeyboardButton("🔙 رجوع", callback_data='back_to_strategy_settings')]
     ])
     await query.edit_message_text("اختر المؤشر الذي تريد تعديل قيمه:", reply_markup=keyboard)
@@ -329,7 +319,8 @@ async def edit_indicator_prompt(update: Update, context: ContextTypes.DEFAULT_TY
     prompts = {
         'ema': "أرسل القيمة الجديدة لفترة EMA (مثال: 20)",
         'rsi': "أرسل القيم الجديدة لـ RSI بالتنسيق: فترة,تشبع بيع,تشبع شراء (مثال: 7,25,75)",
-        'stoch': "أرسل القيم الجديدة لـ Stochastic بالتنسيق: k,d,smooth_k (مثال: 10,5,5)"
+        'stoch': "أرسل القيم الجديدة لـ Stochastic بالتنسيق: k,d,smooth_k (مثال: 10,5,5)",
+        'atr': "أرسل القيمة الجديدة لحساسية ATR (مثال: 0.0004)" # <-- الرسالة الجديدة
     }
     
     msg = await query.edit_message_text(f"**{prompts[indicator]}**\n\nلإلغاء العملية، أرسل /cancel", parse_mode='Markdown')
@@ -361,6 +352,8 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif indicator == 'stoch':
             parts = [int(p.strip()) for p in user_input.split(',')]
             s['stoch_k'], s['stoch_d'], s['stoch_smooth_k'] = parts
+        elif indicator == 'atr': # <-- المنطق الجديد
+            s['atr_threshold_ratio'] = float(user_input)
         
         await update.message.reply_text(f"✅ تم تحديث قيم مؤشر {indicator.upper()} بنجاح.")
     except (ValueError, IndexError):
@@ -448,7 +441,6 @@ def main() -> None:
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     
-    # Handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("cancel", cancel_input_handler))
     
