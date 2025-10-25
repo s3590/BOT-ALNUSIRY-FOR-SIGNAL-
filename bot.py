@@ -72,7 +72,11 @@ def calculate_indicators(df):
     s = bot_state['strategy_settings']
     df.ta.ema(length=s['ema_length'], append=True, col_names=('EMA',))
     df.ta.rsi(length=s['rsi_length'], append=True, col_names=('RSI',))
+    
+    # --- هذا هو السطر الذي تم تصحيحه ---
     df.ta.stoch(k=s['stoch_k'], d=s['stoch_d'], smooth_k=s['stoch_smooth_k'], append=True, col_names=('STOCHk', 'STOCHd'))
+    # ---------------------------------
+
     df.ta.atr(length=s['atr_length'], append=True, col_names=('ATR',))
     return df
 
