@@ -13,20 +13,24 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 
 # --- 1. إعدادات البوت والمتغيرات الأساسية ---
 
-# --- متغيرات البيئة (يجب إضافتها في Render) ---
+# --- (تم التعديل) استخدام أسماء أقصر لمفاتيح API ---
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 API_KEY_1 = os.getenv('API_KEY_1')
 API_KEY_2 = os.getenv('API_KEY_2')
 
+# --- (تم التصحيح) استخدام الأسماء الجديدة هنا أيضًا ---
 API_KEYS = [key for key in [API_KEY_1, API_KEY_2] if key]
 
-# --- قائمة الأزواج الأساسية للتحليل (بعد الحذف) ---
+# --- قائمة الأزواج الأساسية للتحليل ---
 BASE_PAIRS = [
     "EUR/USD", "AUD/USD", "USD/CAD", "USD/CHF", "USD/JPY", "EUR/JPY", 
     "AUD/JPY", "CAD/JPY", "CHF/JPY", "EUR/AUD", "EUR/CAD", "EUR/CHF", 
     "AUD/CAD", "AUD/CHF", "CAD/CHF"
 ]
+
+# ... (بقية الكود لم يتغير وهو صحيح)
+# (سأقوم بلصق بقية الكود للتأكيد)
 
 # --- الإعدادات الافتراضية للاستراتيجية ---
 DEFAULT_STRATEGY_SETTINGS = {
@@ -51,24 +55,23 @@ bot_state = {
     'awaiting_input': None, 'message_to_delete': None,
 }
 
-# --- (جديد) وظيفة إرسال الأخطاء ---
+# --- وظيفة إرسال الأخطاء ---
 async def send_error_to_telegram(context: ContextTypes.DEFAULT_TYPE, error_message: str):
-    """يرسل رسالة خطأ إلى المستخدم عبر تليجرام."""
-    logger.error(error_message) # يسجل الخطأ في Render
-    await context.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔴 **خطأ في البوت** 🔴\n\n{error_message}")
+    logger.error(error_message)
+    await context.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔴 **خطأ في البوت** 🔴\n\n{error_message}", parse_mode='Markdown')
 
 # --- 2. وظائف مساعدة واستراتيجية ---
 
 def get_next_api_key():
-    # ... (الكود لم يتغير)
     key = API_KEYS[bot_state['api_key_index']]
     bot_state['api_key_index'] = (bot_state['api_key_index'] + 1) % len(API_KEYS)
     return key
 
 async def fetch_data(pair):
-    # ... (الكود لم يتغير)
     try:
         api_key = get_next_api_key()
+        # Local import to avoid circular dependency issues if any
+        from twelvedata import TDClient
         td = TDClient(apikey=api_key)
         ts = td.time_series(symbol=pair, interval="5min", outputsize=200, timezone="UTC")
         if ts is None: return None
@@ -78,7 +81,6 @@ async def fetch_data(pair):
         return None
 
 def calculate_indicators(df):
-    # ... (الكود لم يتغير)
     if df is None or df.empty: return None
     s = bot_state['strategy_settings']
     df.ta.ema(length=s['ema_length'], append=True, col_names=('EMA',))
@@ -88,7 +90,6 @@ def calculate_indicators(df):
     return df.iloc[0]
 
 def check_strategy(data):
-    # ... (الكود لم يتغير)
     if data is None: return None
     s = bot_state['strategy_settings']
     signals = {'buy': [], 'sell': []}
@@ -111,14 +112,12 @@ def check_strategy(data):
     return signals
 
 def get_display_pair(pair):
-    # ... (الكود لم يتغير)
     today = datetime.now(pytz.utc).weekday()
     if today == 5 or today == 6:
         return f"{pair} OTC"
     return pair
 
 async def send_signal(context: ContextTypes.DEFAULT_TYPE, chat_id, pair, direction, confidence, confirmations):
-    # ... (الكود لم يتغير)
     display_pair = get_display_pair(pair)
     emoji = "⬆️" if direction == "صعود" else "⬇️"
     stars = "⭐" * confidence
@@ -136,7 +135,6 @@ async def send_signal(context: ContextTypes.DEFAULT_TYPE, chat_id, pair, directi
     await context.bot.send_message(chat_id=chat_id, text=message_text)
 
 async def send_pre_signal_alert(context: ContextTypes.DEFAULT_TYPE, chat_id, pair, direction, confidence, confirmations):
-    # ... (الكود لم يتغير)
     display_pair = get_display_pair(pair)
     emoji = "⬆️" if direction == "صعود" else "⬇️"
     stars = "⭐" * confidence
@@ -162,9 +160,8 @@ REPLY_KEYBOARD_MARKUP = ReplyKeyboardMarkup([
 ], resize_keyboard=True)
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # --- (جديد) التحقق من المفاتيح عند البدء ---
     if not API_KEYS:
-        await send_error_to_telegram(context, "لم يتم العثور على أي مفاتيح Twelve Data API في متغيرات البيئة. لن يعمل تحليل السوق.")
+        await send_error_to_telegram(context, "لم يتم العثور على أي مفاتيح API في متغيرات البيئة. لن يعمل تحليل السوق.")
     
     await update.message.reply_text(
         "أهلاً بك في بوت النصيري (نسخة مطورة)!\n\nاستخدم الأزرار في الأسفل للتحكم.",
@@ -172,7 +169,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (الكود لم يتغير)
     active_pairs_str = ", ".join(bot_state['active_pairs']) if bot_state['active_pairs'] else "لا توجد أزواج قيد المراقبة."
     status_message = (
         f"**📊 حالة بوت النصيري:**\n\n"
@@ -183,7 +179,6 @@ async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(status_message, parse_mode='Markdown')
 
 async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (الكود لم يتغير)
     if not bot_state['active_pairs']:
         await update.message.reply_text("❌ لا يمكن بدء المراقبة. الرجاء تحليل السوق واختيار زوج واحد على الأقل أولاً.")
         return
@@ -195,7 +190,6 @@ async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("البوت يعمل بالفعل.")
 
 async def stop_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (الكود لم يتغير)
     if bot_state['is_running']:
         bot_state['is_running'] = False
         await update.message.reply_text("⏸️ تم إيقاف المراقبة.")
@@ -206,7 +200,6 @@ async def stop_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # --- 4. منطق تحليل السوق التفاعلي ---
 
 async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # --- (جديد) التحقق من المفاتيح قبل التحليل ---
     if not API_KEYS:
         await send_error_to_telegram(context, "فشل تحليل السوق لأنه لم يتم العثور على مفاتيح API.")
         return
@@ -217,7 +210,6 @@ async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_
     
     data_found_count = sum(1 for df in results if df is not None and not df.empty)
 
-    # --- (جديد) التحقق إذا فشل جلب كل البيانات ---
     if data_found_count == 0:
         await send_error_to_telegram(context, "فشل تحليل السوق: لم يتمكن البوت من جلب البيانات لأي زوج. قد تكون مفاتيح API غير صالحة أو أن هناك مشكلة في الاتصال بـ Twelve Data.")
         return
@@ -242,7 +234,6 @@ async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text("**تحليل السوق اكتمل.**\n\nالرجاء تحديد الأزواج التي تريد مراقبتها:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def pair_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (الكود لم يتغير)
     query = update.callback_query
     await query.answer()
     pair = query.data.split('_', 1)[1]
@@ -266,7 +257,6 @@ async def pair_selection_handler(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text(query.message.text, reply_markup=InlineKeyboardMarkup(new_keyboard))
 
 async def confirm_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (الكود لم يتغير)
     query = update.callback_query
     selected_pairs = bot_state['selected_for_monitoring']
     if not selected_pairs:
@@ -278,7 +268,6 @@ async def confirm_selection_handler(update: Update, context: ContextTypes.DEFAUL
     await query.edit_message_text(message)
 
 async def cancel_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (الكود لم يتغير)
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("تم إلغاء عملية الاختيار.")
@@ -286,7 +275,6 @@ async def cancel_selection_handler(update: Update, context: ContextTypes.DEFAULT
 # --- 5. منطق إعدادات الاستراتيجية المتقدمة ---
 
 async def strategy_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود لم يتغير)
     s = bot_state['strategy_settings']
     text = (f"**⚙️ إعدادات الاستراتيجية الحالية:**\n\n"
             f"- مستوى الثقة: {s['signal_threshold']} مؤشرات\n"
@@ -306,7 +294,6 @@ async def strategy_settings_menu(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
 
 async def set_confidence_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود لم يتغير)
     query = update.callback_query
     await query.answer()
     keyboard = InlineKeyboardMarkup([
@@ -317,7 +304,6 @@ async def set_confidence_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.edit_message_text("اختر الحد الأدنى من المؤشرات المتوافقة لإرسال إشارة:", reply_markup=keyboard)
 
 async def set_threshold_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود لم يتغير)
     query = update.callback_query
     threshold = int(query.data.split('_')[-1])
     bot_state['strategy_settings']['signal_threshold'] = threshold
@@ -325,7 +311,6 @@ async def set_threshold_handler(update: Update, context: ContextTypes.DEFAULT_TY
     await strategy_settings_menu(update, context)
 
 async def edit_indicator_values_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود لم يتغير)
     query = update.callback_query
     await query.answer()
     keyboard = InlineKeyboardMarkup([
@@ -337,7 +322,6 @@ async def edit_indicator_values_menu(update: Update, context: ContextTypes.DEFAU
     await query.edit_message_text("اختر المؤشر الذي تريد تعديل قيمه:", reply_markup=keyboard)
 
 async def edit_indicator_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود لم يتغير)
     query = update.callback_query
     indicator = query.data.split('_')[1]
     bot_state['awaiting_input'] = indicator
@@ -352,7 +336,6 @@ async def edit_indicator_prompt(update: Update, context: ContextTypes.DEFAULT_TY
     bot_state['message_to_delete'] = msg.message_id
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود لم يتغير)
     text = update.message.text
     
     if text == "▶️ تشغيل": await start_bot(update, context); return
@@ -394,7 +377,6 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await strategy_settings_menu(update, context)
 
 async def cancel_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود لم يتغير)
     bot_state['awaiting_input'] = None
     if bot_state.get('message_to_delete'):
         try:
@@ -406,14 +388,12 @@ async def cancel_input_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await strategy_settings_menu(update, context)
 
 async def reset_strategy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود لم يتغير)
     query = update.callback_query
     bot_state['strategy_settings'] = DEFAULT_STRATEGY_SETTINGS.copy()
     await query.answer("تم إعادة تعيين جميع الإعدادات إلى الوضع الافتراضي.", show_alert=True)
     await strategy_settings_menu(update, context)
 
 async def close_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (الكود لم يتغير)
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("تم إغلاق القائمة.")
@@ -421,13 +401,11 @@ async def close_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # --- 6. مهمة التحقق من الإشارات الرئيسية ---
 
 async def check_signals_task(context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (الكود لم يتغير)
     if not bot_state['is_running'] or not bot_state['active_pairs']: return
     current_time = datetime.now(pytz.utc)
     seconds_to_next_minute = 60 - current_time.second
     
     async def run_check(is_pre_alert):
-        # ...
         tasks = [fetch_data(pair) for pair in bot_state['active_pairs']]
         results = await asyncio.gather(*tasks)
         for pair, df in zip(bot_state['active_pairs'], results):
@@ -464,7 +442,6 @@ def run_flask():
 
 # --- 8. الوظيفة الرئيسية (Main Function) ---
 def main() -> None:
-    # ... (الكود لم يتغير)
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.start()
     logger.info("بدء تشغيل خادم الويب لإبقاء الخدمة مستيقظة...")
@@ -495,5 +472,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
