@@ -7,6 +7,8 @@ import pytz
 import pandas as pd
 import pandas_ta as ta
 import traceback
+import threading
+from flask import Flask
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
@@ -181,7 +183,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
-        "أهلاً بك في بوت النصيري (نسخة الاختبار حساسة). استخدم الأزرار للتحكم.",
+        "أهلاً بك في بوت النصيري (نسخة مستقرة). استخدم الأزرار للتحكم.",
         reply_markup=reply_markup
     )
 
@@ -303,9 +305,6 @@ async def confirm_selection_handler(update: Update, context: ContextTypes.DEFAUL
     context.user_data['selected_pairs'] = set() # مسح الاختيارات
 
 # --- 5. منطق الإعدادات ---
-# (الكود طويل جدًا، سيتم إضافته في الجزء التالي)
-# --- 5. منطق الإعدادات (تابع) ---
-
 async def settings_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("مستوى الثقة", callback_data="set_threshold")],
@@ -323,11 +322,9 @@ async def ask_for_input(update: Update, context: ContextTypes.DEFAULT_TYPE, sett
     
     bot_state['awaiting_input'] = setting_key
     
-    # حذف الرسالة السابقة إذا كانت موجودة
     if bot_state.get('message_to_delete'):
-        try:
-            await context.bot.delete_message(chat_id=query.message.chat.id, message_id=bot_state['message_to_delete'])
-        except Exception: pass
+        try: await context.bot.delete_message(chat_id=query.message.chat.id, message_id=bot_state['message_to_delete'])
+        except: pass
 
     msg = await query.message.reply_text(f"{prompt_message}\n\nلإلغاء العملية، أرسل /cancel")
     bot_state['message_to_delete'] = msg.message_id
@@ -358,7 +355,6 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     setting_key = bot_state.get('awaiting_input')
 
     if not setting_key:
-        # إذا لم يكن البوت ينتظر إدخالًا، تعامل مع الأزرار النصية
         if user_input == "📊 تحليل السوق": await market_analysis_handler(update, context)
         elif user_input == "▶️ تشغيل": await start_bot(update, context)
         elif user_input == "⏸️ إيقاف": await stop_bot(update, context)
@@ -367,7 +363,6 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else: await update.message.reply_text("أمر غير مفهوم. الرجاء استخدام الأزرار.")
         return
 
-    # مسح رسالة الطلب والرد
     await context.bot.delete_message(chat_id=update.message.chat.id, message_id=update.message.message_id)
     if bot_state.get('message_to_delete'):
         try: await context.bot.delete_message(chat_id=update.message.chat.id, message_id=bot_state['message_to_delete'])
@@ -424,7 +419,6 @@ async def check_signals_task(context: ContextTypes.DEFAULT_TYPE) -> None:
                     
                     candle_time = current_candle['datetime']
                     
-                    # تجنب إرسال إشارات متكررة لنفس الشمعة
                     if pair not in bot_state['last_final_signal_time'] or bot_state['last_final_signal_time'].get(pair) < candle_time:
                         if buy_conf >= bot_state['strategy']['signal_threshold']:
                             await send_signal(context, pair, "صعود", buy_conf, signals['buy'])
@@ -434,9 +428,56 @@ async def check_signals_task(context: ContextTypes.DEFAULT_TYPE) -> None:
                             bot_state['last_final_signal_time'][pair] = candle_time
 
     current_time = datetime.now(pytz.utc)
-    # إرسال الإشارة النهائية عند بداية الشمعة الجديدة (بعد 3-5 ثوانٍ)
     if current_time.second in [3, 4, 5] and current_time.minute % 5 == 0:
         await run_check()
 
+# --- 7. إعداد وتشغيل خادم الويب ---
+app = Flask(__name__)
 
-# 
+@app.route('/')
+def index():
+    return "Bot is running!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# --- 8. الوظيفة الرئيسية (Main Function) ---
+def main() -> None:
+    if not all([TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, API_KEY_1]):
+        logger.critical("FATAL: Missing one or more environment variables.")
+        return
+
+    # بدء خادم الويب في خيط منفصل
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    logger.info("Web server started in a separate thread.")
+
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # الأوامر الرئيسية
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("cancel", cancel_input_handler))
+
+    # معالجات الأزرار المضمنة (Inline)
+    application.add_handler(CallbackQueryHandler(pair_selection_handler, pattern='^select_'))
+    application.add_handler(CallbackQueryHandler(confirm_selection_handler, pattern='^confirm_selection_'))
+    application.add_handler(CallbackQueryHandler(set_threshold, pattern='^set_threshold$'))
+    application.add_handler(CallbackQueryHandler(set_ema, pattern='^set_ema$'))
+    application.add_handler(CallbackQueryHandler(set_rsi, pattern='^set_rsi$'))
+    application.add_handler(CallbackQueryHandler(set_stoch, pattern='^set_stoch$'))
+    application.add_handler(CallbackQueryHandler(set_atr, pattern='^set_atr$'))
+    application.add_handler(CallbackQueryHandler(reset_strategy, pattern='^reset_strategy$'))
+    
+    # معالج النصوص (للأزرار النصية والإدخالات)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
+
+    # جدولة المهمة
+    application.job_queue.run_repeating(check_signals_task, interval=1, first=5)
+    
+    logger.info("Starting Telegram bot polling...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    main()
