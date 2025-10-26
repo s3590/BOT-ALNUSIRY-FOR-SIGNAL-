@@ -1,8 +1,10 @@
 python-telegram-bot[job-queue]
-pytz
-asyncio
 pandas
 pandas-ta
 twelvedata
+pytz
+requests
+apscheduler
+flask
 
 
