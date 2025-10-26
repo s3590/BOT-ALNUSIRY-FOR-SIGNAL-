@@ -4,4 +4,5 @@ asyncio
 pandas
 pandas-ta
 twelvedata
-Flask
+
+
