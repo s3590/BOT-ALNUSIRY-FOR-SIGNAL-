@@ -30,7 +30,7 @@ DEFAULT_STRATEGY = {
 }
 
 TIMEFRAME = "5min"
-OUTPUT_SIZE = 300  # <-- تم التعديل: زيادة حجم البيانات للاحتياط
+OUTPUT_SIZE = 300
 BASE_PAIRS = ["EUR/USD", "AUD/USD", "USD/CAD", "USD/CHF", "USD/JPY", "EUR/JPY", "AUD/JPY", "CAD/JPY", "CHF/JPY", "EUR/AUD", "EUR/CAD", "EUR/CHF", "AUD/CAD", "AUD/CHF", "CAD/CHF"]
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -42,103 +42,97 @@ bot_state = {
     'awaiting_input': None, 'message_to_delete': None,
 }
 
-# --- 2. وظائف مساعدة ---
+# --- 2. وظائف مساعدة (مع تحسينات) ---
 def get_next_api_key():
     if not API_KEYS: return None
     key = API_KEYS[bot_state['api_key_index']]
     bot_state['api_key_index'] = (bot_state['api_key_index'] + 1) % len(API_KEYS)
     return key
 
-async def fetch_data(pair, context):
+# ***** تم التعديل: إضافة إعادة محاولة وفترات انتظار *****
+async def fetch_data(pair, context, max_retries=2):
     api_key = get_next_api_key()
     if not api_key:
         logger.error("لا توجد مفاتيح API متاحة.")
         return None
-    try:
-        td = TDClient(apikey=api_key)
-        ts = td.time_series(symbol=pair, interval=TIMEFRAME, outputsize=OUTPUT_SIZE, timezone="UTC")
-        if ts is None or ts.empty:
-            logger.warning(f"لم يتم استلام بيانات للزوج {pair}.")
-            return None
-        # عكس البيانات بحيث تكون الأحدث في النهاية
-        df = ts.as_pandas().iloc[::-1].reset_index()
-        return df
-    except Exception as e:
-        logger.error(f"فشل جلب البيانات للزوج {pair}: {e}")
-        return None
+        
+    for attempt in range(max_retries):
+        try:
+            td = TDClient(apikey=api_key)
+            ts = td.time_series(symbol=pair, interval=TIMEFRAME, outputsize=OUTPUT_SIZE, timezone="UTC")
+            if ts is None or ts.empty:
+                logger.warning(f"محاولة {attempt + 1}: لم يتم استلام بيانات للزوج {pair}.")
+                await asyncio.sleep(2) # انتظار ثانيتين قبل المحاولة التالية
+                continue
+            df = ts.as_pandas().iloc[::-1].reset_index()
+            return df
+        except Exception as e:
+            logger.error(f"محاولة {attempt + 1}: فشل جلب البيانات للزوج {pair} بسبب: {e}")
+            await asyncio.sleep(2) # انتظار ثانيتين قبل المحاولة التالية
+    
+    logger.critical(f"فشل جلب البيانات للزوج {pair} بعد {max_retries} محاولات.")
+    return None
 
-# --- 3. حساب المؤشرات (مع الإصلاح الكامل) ---
+
+# --- 3. حساب المؤشرات (الكود السابق صحيح) ---
 def calculate_indicators(df, strategy):
     try:
-        # التحقق من أن البيانات كافية للحسابات
-        required_length = max(strategy['ema_period'], strategy['rsi_period'], strategy['stoch_k'], 14) + 5 # إضافة هامش أمان
+        required_length = max(strategy['ema_period'], strategy['rsi_period'], strategy['stoch_k'], 14) + 5
         if df is None or df.empty or len(df) < required_length:
             logger.warning(f"بيانات غير كافية لحساب المؤشرات. الطول المطلوب: {required_length}, الطول الحالي: {len(df) if df is not None else 0}")
             return None, None
 
-        # حساب المؤشرات باستخدام pandas_ta
         df.ta.ema(length=strategy['ema_period'], append=True)
         df.ta.rsi(length=strategy['rsi_period'], append=True)
         df.ta.atr(length=14, append=True)
 
-        # ***** الإصلاح الرئيسي هنا: تحديد 3 أسماء للأعمدة بشكل صحيح *****
         stoch_k = strategy['stoch_k']
         stoch_d = strategy['stoch_d']
         smooth_k = strategy['stoch_smooth_k']
-        stoch_col_names = [
-            f'STOCHk_{stoch_k}_{stoch_d}_{smooth_k}',
-            f'STOCHd_{stoch_k}_{stoch_d}_{smooth_k}',
-            f'STOCHh_{stoch_k}_{stoch_d}_{smooth_k}' # العمود الثالث المطلوب
-        ]
+        stoch_col_names = [f'STOCHk_{stoch_k}_{stoch_d}_{smooth_k}', f'STOCHd_{stoch_k}_{stoch_d}_{smooth_k}', f'STOCHh_{stoch_k}_{stoch_d}_{smooth_k}']
         df.ta.stoch(k=stoch_k, d=stoch_d, smooth_k=smooth_k, append=True, col_names=stoch_col_names)
 
-        # التأكد من أن جميع الأعمدة المطلوبة موجودة
-        all_cols = list(df.columns)
-        if not all(col in all_cols for col in stoch_col_names):
+        if not all(col in df.columns for col in stoch_col_names):
             logger.error("فشل إنشاء أعمدة الاستوكاستك.")
             return None, None
 
-        # ***** الإصلاح الثاني: إرجاع الشموع الصحيحة (الأحدث في النهاية) *****
-        # df.iloc[-1] هي الشمعة الحالية (الأحدث)
-        # df.iloc[-2] هي الشمعة السابقة
         return df.iloc[-1], df.iloc[-2]
 
     except Exception as e:
         logger.error(f"خطأ فادح في calculate_indicators: {e}\n{traceback.format_exc()}")
         return None, None
 
-
-# --- 4. منطق تحليل السوق ---
+# --- 4. منطق تحليل السوق (مع تحسينات) ---
 async def analyze_single_pair(pair, context, strategy):
     df = await fetch_data(pair, context)
     if df is None:
         return pair, None, "⚠️ فشل جلب البيانات."
 
-    # نستخدم فقط الشمعة الحالية لتحليل التقلب
     current_candle, _ = calculate_indicators(df, strategy)
     if current_candle is None:
-        return pair, None, "⚠️ فشل حساب المؤشرات."
+        return pair, None, "⚠️ فشل حساب المؤشرات (بيانات غير كافية)."
 
-    # التحقق من وجود الأعمدة المطلوبة وأنها ليست فارغة
-    if 'ATR_14' in current_candle and not pd.isna(current_candle['ATR_14']) and 'close' in current_candle and current_candle['close'] > 0:
+    if 'ATR_14' in current_candle and pd.notna(current_candle['ATR_14']) and 'close' in current_candle and current_candle['close'] > 0:
         volatility_ratio = current_candle['ATR_14'] / current_candle['close']
         is_active = volatility_ratio > strategy['atr_sensitivity']
         report_line = f"{'✅' if is_active else '❌'} | النسبة: {volatility_ratio:.6f}"
         return pair, is_active, report_line
     else:
-        # رسالة خطأ أكثر تفصيلاً
-        missing_info = []
-        if 'ATR_14' not in current_candle or pd.isna(current_candle['ATR_14']):
-            missing_info.append("ATR")
-        if 'close' not in current_candle or current_candle['close'] <= 0:
-            missing_info.append("Close price")
-        return pair, None, f"⚠️ فشل حساب التقلب (بيانات مفقودة: {', '.join(missing_info)})"
+        return pair, None, "⚠️ فشل حساب التقلب (بيانات ATR مفقودة)."
 
+# ***** تم التعديل: تحليل الأزواج بشكل تسلسلي لتجنب مشاكل الـ API *****
 async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = await update.message.reply_text("⏳ جاري تحليل السوق لجميع الأزواج...")
+    msg = await update.message.reply_text("⏳ جاري تحليل السوق... (قد يستغرق هذا بعض الوقت)")
     strategy = bot_state['strategy']
-    tasks = [analyze_single_pair(pair, context, strategy) for pair in BASE_PAIRS]
-    results = await asyncio.gather(*tasks)
+    
+    results = []
+    total_pairs = len(BASE_PAIRS)
+    for i, pair in enumerate(BASE_PAIRS):
+        # تحديث الرسالة لإظهار التقدم
+        await msg.edit_text(f"⏳ جاري تحليل السوق... ({i + 1}/{total_pairs})\nالزوج الحالي: {pair}")
+        result = await analyze_single_pair(pair, context, strategy)
+        results.append(result)
+        await asyncio.sleep(1) # <-- أهم تعديل: انتظار ثانية بين كل طلب API
 
     active_pairs_found = []
     volatility_report = "--- تقرير التقلب ---\n"
@@ -147,21 +141,22 @@ async def market_analysis_handler(update: Update, context: ContextTypes.DEFAULT_
         if is_active:
             active_pairs_found.append(pair)
     
-    # استخدام MarkdownV2 يتطلب تهريب الأحرف الخاصة، لذا سنستخدم Markdown العادي لتبسيط الأمر
     await msg.edit_text(f"```\n{volatility_report}\n```", parse_mode='Markdown')
 
     if not active_pairs_found:
-        await context.bot.send_message(chat_id=update.message.chat_id, text="تحليل السوق اكتمل: لم يتم العثور على أزواج نشطة حسب حساسية ATR الحالية.")
+        await context.bot.send_message(chat_id=update.message.chat_id, text="تحليل السوق اكتمل: لم يتم العثور على أزواج نشطة.")
         return
 
     keyboard = [[InlineKeyboardButton(f"🔲 {pair}", callback_data=f"select_{pair}")] for pair in active_pairs_found]
     keyboard.append([InlineKeyboardButton("✅ بدء المراقبة", callback_data="confirm_selection")])
     await context.bot.send_message(
         chat_id=update.message.chat_id,
-        text="**تحليل السوق اكتمل.**\nاختر الأزواج للمراقبة من القائمة أدناه:",
+        text="**تحليل السوق اكتمل.**\nاختر الأزواج للمراقبة:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
+
+# --- (بقية الكود من 5 إلى 8 يبقى كما هو في الإصدار السابق) ---
 
 # --- 5. منطق فحص الإشارة والإرسال ---
 def check_strategy(current_candle, prev_candle, strategy):
@@ -171,19 +166,19 @@ def check_strategy(current_candle, prev_candle, strategy):
 
     # EMA Signal
     ema_col = f'EMA_{strategy["ema_period"]}'
-    if ema_col in current_candle and not pd.isna(current_candle[ema_col]):
+    if ema_col in current_candle and pd.notna(current_candle[ema_col]):
         if close_price > current_candle[ema_col]: signals['buy'].append('EMA')
         elif close_price < current_candle[ema_col]: signals['sell'].append('EMA')
 
     # RSI Signal
     rsi_col = f'RSI_{strategy["rsi_period"]}'
-    if rsi_col in current_candle and not pd.isna(current_candle[rsi_col]):
+    if rsi_col in current_candle and pd.notna(current_candle[rsi_col]):
         if current_candle[rsi_col] < strategy['rsi_oversold']: signals['buy'].append('RSI')
         elif current_candle[rsi_col] > strategy['rsi_overbought']: signals['sell'].append('RSI')
 
     # Stochastic Signal
     stoch_k_col = f'STOCHk_{strategy["stoch_k"]}_{strategy["stoch_d"]}_{strategy["stoch_smooth_k"]}'
-    if stoch_k_col in current_candle and not pd.isna(current_candle[stoch_k_col]):
+    if stoch_k_col in current_candle and pd.notna(current_candle[stoch_k_col]):
         if current_candle[stoch_k_col] < strategy['stoch_oversold']: signals['buy'].append('Stochastic')
         elif current_candle[stoch_k_col] > strategy['stoch_overbought']: signals['sell'].append('Stochastic')
 
@@ -330,10 +325,10 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # إذا كان البوت ينتظر إدخالاً
-    await context.bot.delete_message(chat_id=update.message.chat_id, message_id=update.message.message_id)
+    await context.bot.delete_message(chat_id=update.message.chat.id, message_id=update.message.message_id)
     if bot_state.get('message_to_delete'):
         try:
-            await context.bot.delete_message(chat_id=update.message.chat_id, message_id=bot_state['message_to_delete'])
+            await context.bot.delete_message(chat_id=update.message.chat.id, message_id=bot_state['message_to_delete'])
         except Exception:
             pass # تجاهل الخطأ إذا تم حذف الرسالة بالفعل
 
@@ -365,7 +360,6 @@ async def check_signals_task(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     current_time = datetime.now(pytz.utc)
-    # تشغيل المهمة في بداية كل شمعة 5 دقائق (الثواني الأولى)
     if not (current_time.minute % 5 == 0 and current_time.second < 10):
         return
 
@@ -374,7 +368,6 @@ async def check_signals_task(context: ContextTypes.DEFAULT_TYPE) -> None:
     async def run_check_for_pair(pair):
         candle_start_time = current_time.replace(second=0, microsecond=0)
         
-        # التأكد من عدم إرسال إشارة لنفس الشمعة أكثر من مرة
         if bot_state['last_final_signal_time'].get(pair) == candle_start_time:
             return
 
@@ -411,27 +404,23 @@ def main() -> None:
         logger.critical("FATAL: متغيرات البيئة الأساسية مفقودة (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, API_KEY_1).")
         return
 
-    # تشغيل Flask في خيط منفصل للحفاظ على استجابة Render
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # إضافة المعالجات
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("cancel", cancel_input_handler))
     application.add_handler(CallbackQueryHandler(pair_selection_handler, pattern='^select_'))
     application.add_handler(CallbackQueryHandler(confirm_selection_handler, pattern='^confirm_selection'))
     application.add_handler(CallbackQueryHandler(set_atr, pattern='^set_atr$'))
     application.add_handler(CallbackQueryHandler(reset_strategy, pattern='^reset_strategy$'))
-    application.add_handler(CallbackQueryHandler(lambda u,c: start(u.callback_query,c), pattern='^back_to_main$')) # زر الرجوع
+    application.add_handler(CallbackQueryHandler(lambda u,c: start(u.callback_query,c), pattern='^back_to_main$'))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input))
 
-    # جدولة المهمة الدورية
-    application.job_queue.run_repeating(check_signals_task, interval=10, first=5) # فحص كل 10 ثوانٍ
+    application.job_queue.run_repeating(check_signals_task, interval=10, first=5)
 
-    # تشغيل البوت
     logger.info("Bot is starting...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
